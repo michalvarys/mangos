@@ -6218,6 +6218,22 @@ void Spell::EffectSummonPlayer(SpellEffectIndex /*eff_idx*/)
     ((Player*)unitTarget)->GetSession()->SendPacket(&data);
 }
 
+void Spell::EffectSpecCount(uint32 /*eff_idx*/)
+{
+    if(!unitTarget || unitTarget->GetTypeId() != TYPEID_PLAYER)
+        return;
+
+    ((Player*)unitTarget)->UpdateSpecCount(damage);
+}
+
+void Spell::EffectActivateSpec(uint32 /*eff_idx*/)
+{
+    if(!unitTarget || unitTarget->GetTypeId() != TYPEID_PLAYER)
+        return;
+
+    ((Player*)unitTarget)->ActivateSpec(damage-1);  // damage is 1 or 2, spec is 0 or 1
+}
+
 static ScriptInfo generateActivateCommand()
 {
     ScriptInfo si;

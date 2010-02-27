@@ -1,12 +1,4 @@
 /*
- * Copyright (C) 2005-2010 MaNGOS <http://getmangos.com/>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
@@ -97,6 +89,12 @@ struct PlayerSpell
 
 typedef UNORDERED_MAP<uint32, PlayerSpell> PlayerSpellMap;
 
+struct PlayerTalent
+{
+    PlayerSpellState state : 8;
+    uint8 spec             : 8;
+};
+
 // Spell modifier (used for modify other spells)
 struct SpellModifier
 {
@@ -122,6 +120,7 @@ struct SpellModifier
     Spell const* lastAffected;
 };
 
+typedef UNORDERED_MAP<uint32, PlayerTalent*> PlayerTalentMap;
 typedef std::list<SpellModifier*> SpellModList;
 
 struct SpellCooldown
@@ -164,10 +163,11 @@ enum ActionButtonType
 
 struct ActionButton
 {
-    ActionButton() : packedData(0), uState( ACTIONBUTTON_NEW ) {}
+    ActionButton() : packedData(0), uState( ACTIONBUTTON_NEW ), canRemoveByClient(true){}
 
     uint32 packedData;
     ActionButtonUpdateState uState;
+    bool canRemoveByClient;
 
     // helpers
     ActionButtonType GetType() const { return ActionButtonType(ACTION_BUTTON_TYPE(packedData)); }
@@ -889,7 +889,8 @@ enum PlayerLoginQueryIndex
     PLAYER_LOGIN_QUERY_LOADACCOUNTDATA          = 20,
     PLAYER_LOGIN_QUERY_LOADSKILLS               = 21,
     PLAYER_LOGIN_QUERY_LOADGLYPHS               = 22,
-    MAX_PLAYER_LOGIN_QUERY                      = 23
+    PLAYER_LOGIN_QUERY_LOADTALENTS              = 23,
+    MAX_PLAYER_LOGIN_QUERY                      = 24
 };
 
 enum PlayerDelayedOperations
@@ -1569,21 +1570,30 @@ class MANGOS_DLL_SPEC Player : public Unit
         void LearnTalent(uint32 talentId, uint32 talentRank);
         void LearnPetTalent(uint64 petGuid, uint32 talentId, uint32 talentRank);
 
+        bool AddTalent(uint32 spell, uint8 spec, bool learning);
+        bool HasTalent(uint32 spell_id, uint8 spec) const;
+
         uint32 CalculateTalentsPoints() const;
 
         // Dual Spec
+        void UpdateSpecCount(uint8 count);
         uint8 GetActiveSpec() { return m_activeSpec; }
-        void SetActiveSpec(uint8 spec) { m_activeSpec = spec; }
+        void SetActiveSpec(uint8 spec){ m_activeSpec = spec; }
         uint8 GetSpecsCount() { return m_specsCount; }
         void SetSpecsCount(uint8 count) { m_specsCount = count; }
-        void ActivateSpec(uint8 specNum);
-        void UpdateSpecCount(uint8 count);
+        void ActivateSpec(uint8 spec);
+
+
 
         void InitGlyphsForLevel();
         void SetGlyphSlot(uint8 slot, uint32 slottype) { SetUInt32Value(PLAYER_FIELD_GLYPH_SLOTS_1 + slot, slottype); }
         uint32 GetGlyphSlot(uint8 slot) { return GetUInt32Value(PLAYER_FIELD_GLYPH_SLOTS_1 + slot); }
-        void SetGlyph(uint8 slot, uint32 glyph) { m_glyphs[m_activeSpec][slot].SetId(glyph); }
-        uint32 GetGlyph(uint8 slot) { return m_glyphs[m_activeSpec][slot].GetId(); }
+        void SetGlyph(uint8 slot, uint32 glyph)
+        { 
+            m_Glyphs[m_activeSpec][slot] = glyph;
+            SetUInt32Value(PLAYER_FIELD_GLYPHS_1 + slot, glyph); 
+        }
+        uint32 GetGlyph(uint8 slot) { return m_Glyphs[m_activeSpec][slot]; }
         void ApplyGlyph(uint8 slot, bool apply);
         void ApplyGlyphs(bool apply);
 
@@ -1656,7 +1666,8 @@ class MANGOS_DLL_SPEC Player : public Unit
         static bool IsActionButtonDataValid(uint8 button, uint32 action, uint8 type, Player* player, bool msg = true);
         ActionButton* addActionButton(uint8 spec, uint8 button, uint32 action, uint8 type);
         void removeActionButton(uint8 spec, uint8 button);
-        void SendInitialActionButtons() const;
+        void SendInitialActionButtons() const { SendActionButtons(0); }
+        void SendActionButtons(uint32 state) const;
         ActionButton const* GetActionButton(uint8 button);
 
         PvPInfo pvpInfo;
@@ -2317,7 +2328,7 @@ class MANGOS_DLL_SPEC Player : public Unit
         /***                   LOAD SYSTEM                     ***/
         /*********************************************************/
 
-        void _LoadActions(QueryResult *result);
+        void _LoadActions(QueryResult *result, bool startup);
         void _LoadAuras(QueryResult *result, uint32 timediff);
         void _LoadBoundInstances(QueryResult *result);
         void _LoadInventory(QueryResult *result, uint32 timediff);
@@ -2335,6 +2346,7 @@ class MANGOS_DLL_SPEC Player : public Unit
         void _LoadEquipmentSets(QueryResult *result);
         void _LoadBGData(QueryResult* result);
         void _LoadGlyphs(QueryResult *result);
+        void _LoadTalents(QueryResult *result);
 
         /*********************************************************/
         /***                   SAVE SYSTEM                     ***/
@@ -2351,6 +2363,7 @@ class MANGOS_DLL_SPEC Player : public Unit
         void _SaveEquipmentSets();
         void _SaveBGData();
         void _SaveGlyphs();
+        void _SaveTalents();
 
         void _SetCreateBits(UpdateMask *updateMask, Player *target) const;
         void _SetUpdateBits(UpdateMask *updateMask, Player *target) const;
@@ -2403,10 +2416,12 @@ class MANGOS_DLL_SPEC Player : public Unit
         PlayerMails m_mail;
         PlayerSpellMap m_spells;
         SpellCooldowns m_spellCooldowns;
+        PlayerTalentMap *m_talents[MAX_TALENT_SPECS];
         uint32 m_lastPotionId;                              // last used health/mana potion in combat, that block next potion use
 
         uint8 m_activeSpec;
         uint8 m_specsCount;
+				uint32 m_Glyphs[MAX_TALENT_SPECS][MAX_GLYPH_SLOT_INDEX];
 
         ActionButtonList m_actionButtons[MAX_TALENT_SPEC_COUNT];
 
